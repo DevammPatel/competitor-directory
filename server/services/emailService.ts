@@ -263,3 +263,256 @@ export async function sendDailyDigestEmailsBatch(
   return emailsSentCount;
 }
 
+function markdownToHtml(md: string): string {
+  // Replace headers (from # down to ###)
+  let html = md
+    .replace(/^# (.*$)/gim, '<h1 style="color:#0f172a;font-size:24px;font-weight:800;margin-top:24px;margin-bottom:12px;border-bottom:1px solid #cbd5e1;padding-bottom:8px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">$1</h1>')
+    .replace(/^## (.*$)/gim, '<h2 style="color:#1e293b;font-size:18px;font-weight:700;margin-top:20px;margin-bottom:8px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">$1</h2>')
+    .replace(/^### (.*$)/gim, '<h3 style="color:#334155;font-size:15px;font-weight:600;margin-top:16px;margin-bottom:6px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">$1</h3>')
+    
+    // Bold / Italic
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    
+    // Unordered lists
+    .replace(/^\* (.*$)/gim, '<li style="margin-left:20px;margin-bottom:6px;color:#334155;font-size:15px;line-height:1.6;">$1</li>')
+    .replace(/^- (.*$)/gim, '<li style="margin-left:20px;margin-bottom:6px;color:#334155;font-size:15px;line-height:1.6;">$1</li>')
+    
+    // Newlines
+    .replace(/\n\n/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+
+  // Convert standard markdown links [text](url) to HTML
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#0284c7;text-decoration:underline;">$1</a>');
+
+  return html;
+}
+
+export async function sendDailyAiReportEmailBatch(
+  subscribers: { email: string | null; name: string | null }[],
+  dateStr: string,
+  markdown: string
+): Promise<number> {
+  const validSubscribers = subscribers.filter(s => !!s.email);
+  if (!resend || validSubscribers.length === 0 || !markdown) return 0;
+
+  const htmlContent = markdownToHtml(markdown);
+  const subject = `📊 Daily Competitor Intel Briefing — ${new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+
+  let emailsSentCount = 0;
+  const chunks = [];
+  const chunkSize = 100;
+  for (let i = 0; i < validSubscribers.length; i += chunkSize) {
+    chunks.push(validSubscribers.slice(i, i + chunkSize));
+  }
+
+  for (const chunk of chunks) {
+    const payload = chunk.map(sub => {
+      const emailHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Daily Competitor Briefing</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;text-align:left;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding-bottom:24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(to right, #0f172a, #1e293b);border-radius:16px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
+                <tr>
+                  <td style="padding:32px;">
+                    <div style="color:#38bdf8;font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Competitor Directory</div>
+                    <div style="color:#ffffff;font-size:26px;font-weight:800;margin-bottom:8px;line-height:1.2;">Daily Intel Briefing</div>
+                    <div style="color:#94a3b8;font-size:15px;font-weight:500;">
+                      ${new Date(dateStr).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:32px;box-shadow:0 1px 3px rgba(0,0,0,0.05);color:#334155;font-size:15px;line-height:1.6;">
+              <p style="margin-top:0;margin-bottom:20px;font-size:16px;color:#0f172a;">Hi ${sub.name || "there"},</p>
+              <div>
+                ${htmlContent}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:32px 8px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="text-align:center;">
+                <tr>
+                  <td style="border-top:1px solid #cbd5e1;padding-top:32px;">
+                    <p style="margin:0 0 16px 0;color:#64748b;font-size:13px;line-height:1.5;">
+                      You are receiving this intelligence report because you have email notifications enabled in your <strong>Competitor Directory</strong> settings.
+                    </p>
+                    <p style="margin:0;">
+                      <a href="${APP_URL}/settings" style="color:#0284c7;font-size:13px;font-weight:600;text-decoration:none;background-color:#e0f2fe;padding:8px 16px;border-radius:6px;display:inline-block;">Manage Notifications</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+      `;
+
+      return {
+        from: FROM_EMAIL,
+        to: sub.email!,
+        subject,
+        html: emailHtml,
+        text: markdown,
+        headers: {
+          "List-Unsubscribe": `<${APP_URL}/settings>`
+        }
+      };
+    });
+
+    try {
+      const { error } = await resend.batch.send(payload);
+      if (error) {
+        console.error("[Email] Resend batch error:", error);
+      } else {
+        emailsSentCount += chunk.length;
+      }
+    } catch (err) {
+      console.error("[Email] Failed to send batch:", err);
+    }
+  }
+
+  return emailsSentCount;
+}
+
+export async function sendWeeklyDigestEmailsBatch(
+  subscribers: { email: string | null; name: string | null }[],
+  dateStr: string,
+  markdown: string
+): Promise<number> {
+  const validSubscribers = subscribers.filter(s => !!s.email);
+  if (!resend || validSubscribers.length === 0 || !markdown) return 0;
+
+  const htmlContent = markdownToHtml(markdown);
+  const subject = `🔮 Weekly Competitor Intel Digest — W/C ${new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+
+  let emailsSentCount = 0;
+  const chunks = [];
+  const chunkSize = 100;
+  for (let i = 0; i < validSubscribers.length; i += chunkSize) {
+    chunks.push(validSubscribers.slice(i, i + chunkSize));
+  }
+
+  for (const chunk of chunks) {
+    const payload = chunk.map(sub => {
+      const emailHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Weekly Competitor Digest</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;text-align:left;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding-bottom:24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(to right, #4f46e5, #4338ca);border-radius:16px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
+                <tr>
+                  <td style="padding:32px;">
+                    <div style="color:#c7d2fe;font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Competitor Directory</div>
+                    <div style="color:#ffffff;font-size:26px;font-weight:800;margin-bottom:8px;line-height:1.2;">Weekly Intel Digest</div>
+                    <div style="color:#e0e7ff;font-size:15px;font-weight:500;">
+                      Week of ${new Date(dateStr).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:32px;box-shadow:0 1px 3px rgba(0,0,0,0.05);color:#334155;font-size:15px;line-height:1.6;">
+              <p style="margin-top:0;margin-bottom:20px;font-size:16px;color:#0f172a;">Hi ${sub.name || "there"},</p>
+              <div>
+                ${htmlContent}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:32px 8px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="text-align:center;">
+                <tr>
+                  <td style="border-top:1px solid #cbd5e1;padding-top:32px;">
+                    <p style="margin:0 0 16px 0;color:#64748b;font-size:13px;line-height:1.5;">
+                      You are receiving this intelligence report because you have email notifications enabled in your <strong>Competitor Directory</strong> settings.
+                    </p>
+                    <p style="margin:0;">
+                      <a href="${APP_URL}/settings" style="color:#4f46e5;font-size:13px;font-weight:600;text-decoration:none;background-color:#e0e7ff;padding:8px 16px;border-radius:6px;display:inline-block;">Manage Notifications</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+      `;
+
+      return {
+        from: FROM_EMAIL,
+        to: sub.email!,
+        subject,
+        html: emailHtml,
+        text: markdown,
+        headers: {
+          "List-Unsubscribe": `<${APP_URL}/settings>`
+        }
+      };
+    });
+
+    try {
+      const { error } = await resend.batch.send(payload);
+      if (error) {
+        console.error("[Email] Resend batch error:", error);
+      } else {
+        emailsSentCount += chunk.length;
+      }
+    } catch (err) {
+      console.error("[Email] Failed to send batch:", err);
+    }
+  }
+
+  return emailsSentCount;
+}
+

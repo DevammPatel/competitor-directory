@@ -83,6 +83,28 @@ async function fetchLinkedInCompanyPosts(trackedCompanies: Company[]) {
   });
 
   return items.flatMap(item => {
+    const postUrl: string | undefined = item.linkedinUrl ?? item.postUrl ?? item.url;
+    if (!postUrl) {
+      return [];
+    }
+
+    const urlLower = postUrl.toLowerCase();
+
+    // Filter out comments, reactions, shares, etc.
+    if (
+      item.isComment === true ||
+      urlLower.includes("/recent-activity/shares") ||
+      urlLower.includes("/recent-activity/comments") ||
+      urlLower.includes("/detail/recent-activity") ||
+      urlLower.includes("comment") ||
+      urlLower.includes("reply") ||
+      (typeof item.action === "string" && item.action.toLowerCase().includes("comment")) ||
+      (typeof item.type === "string" && item.type.toLowerCase().includes("comment")) ||
+      (typeof item.postType === "string" && item.postType.toLowerCase().includes("comment"))
+    ) {
+      return [];
+    }
+
     const rawAuthorUrl: string = item.author?.linkedinUrl ?? item.authorUrl ?? item.companyUrl ?? "";
     const cleanedAuthorUrl = rawAuthorUrl.replace(/\/posts\/?$/, "");
     const itemSlug = extractLinkedInSlug(cleanedAuthorUrl);
@@ -90,9 +112,8 @@ async function fetchLinkedInCompanyPosts(trackedCompanies: Company[]) {
     const company = trackedCompanies.find(c =>
       extractLinkedInSlug(c.linkedin) === itemSlug || c.linkedin.includes(itemSlug)
     );
-    if (!company) return [];
+    if (!company || urlLower === company.linkedin.toLowerCase()) return [];
 
-    const postUrl: string = item.linkedinUrl ?? item.postUrl ?? item.url ?? company.linkedin;
     const postedAtRaw = item.postedAt?.date ?? item.postedAt ?? item.publishedAt ?? item.date;
 
     return [{
@@ -129,6 +150,28 @@ async function fetchLinkedInPersonPosts(trackedPeople: Person[]) {
   });
 
   return items.flatMap(item => {
+    const postUrl: string | undefined = item.linkedinUrl ?? item.postUrl ?? item.url;
+    if (!postUrl) {
+      return [];
+    }
+
+    const urlLower = postUrl.toLowerCase();
+
+    // Filter out comments, reactions, shares, etc.
+    if (
+      item.isComment === true ||
+      urlLower.includes("/recent-activity/shares") ||
+      urlLower.includes("/recent-activity/comments") ||
+      urlLower.includes("/detail/recent-activity") ||
+      urlLower.includes("comment") ||
+      urlLower.includes("reply") ||
+      (typeof item.action === "string" && item.action.toLowerCase().includes("comment")) ||
+      (typeof item.type === "string" && item.type.toLowerCase().includes("comment")) ||
+      (typeof item.postType === "string" && item.postType.toLowerCase().includes("comment"))
+    ) {
+      return [];
+    }
+
     const rawAuthorUrl: string = item.author?.linkedinUrl ?? item.authorUrl ?? item.profileUrl ?? "";
     const cleanedAuthorUrl = rawAuthorUrl.replace(/\/recent-activity.*$/, "").replace(/\/posts\/?$/, "");
     const itemSlug = extractLinkedInSlug(cleanedAuthorUrl);
@@ -136,9 +179,8 @@ async function fetchLinkedInPersonPosts(trackedPeople: Person[]) {
     const person = trackedPeople.find(p =>
       extractLinkedInSlug(p.linkedin) === itemSlug || p.linkedin.includes(itemSlug)
     );
-    if (!person) return [];
+    if (!person || urlLower === person.linkedin.toLowerCase()) return [];
 
-    const postUrl: string = item.linkedinUrl ?? item.postUrl ?? item.url ?? person.linkedin;
     const postedAtRaw = item.postedAt?.date ?? item.postedAt ?? item.publishedAt ?? item.date;
 
     return [{
@@ -212,17 +254,7 @@ export async function runCompetitorMonitoringJob() {
     const postsAdded = insertedPostIds.length;
     console.log(`[${taskName}] Added ${postsAdded} new posts`);
 
-    if (postsAdded > 0) {
-      const subscribers = await getUsersWithEmailEnabled();
-      const validSubscribers = subscribers.filter(s => !!s.email);
-      let emailsSentCount = 0;
 
-      if (validSubscribers.length > 0) {
-        emailsSentCount = await sendDailyDigestEmailsBatch(validSubscribers, allPosts as any);
-      }
-
-      console.log(`[${taskName}] Sent digest emails to ${emailsSentCount}/${validSubscribers.length} valid subscribers`);
-    }
 
     if (taskLog) {
       await updateTaskLog(taskLog.id, {

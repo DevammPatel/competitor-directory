@@ -11,14 +11,16 @@ import {
   updateTaskLog,
   utcReportDate,
   utcReportDateString,
+  getUsersWithEmailEnabled,
 } from "../db";
 import { ENV } from "../_core/env";
 import { generateCompetitorReport } from "./openaiService";
+import { sendDailyAiReportEmailBatch } from "./emailService";
 
 const MAX_POSTS_PER_RUN = 50;
 const TASK_NAME = "daily-ai-report";
 
-function resolveEntityName(
+export function resolveEntityName(
   post: CompetitorPost,
   companiesById: Map<string, Company>,
   peopleById: Map<string, Person>,
@@ -34,7 +36,7 @@ function resolveEntityName(
   return { name: post.authorName ?? "Unknown", type: post.sourceType === "person" ? "person" : "company" };
 }
 
-function groupPostsForPrompt(
+export function groupPostsForPrompt(
   posts: CompetitorPost[],
   companies: Company[],
   people: Person[],
@@ -169,6 +171,22 @@ export async function runDailyAiReportJob(): Promise<{
       report.id,
       unreportedPosts.map((p) => p.id),
     );
+
+    // Send email digest of the daily report
+    try {
+      const subscribers = await getUsersWithEmailEnabled();
+      const validSubscribers = subscribers.filter(s => !!s.email);
+      if (validSubscribers.length > 0) {
+        const emailsSent = await sendDailyAiReportEmailBatch(
+          validSubscribers,
+          reportDateStr,
+          result.output.summaryMarkdown
+        );
+        console.log(`[${TASK_NAME}] Emailed daily AI report to ${emailsSent}/${validSubscribers.length} subscribers`);
+      }
+    } catch (emailError) {
+      console.error(`[${TASK_NAME}] Failed to send daily AI report emails:`, emailError);
+    }
 
     if (taskLogId) {
       await updateTaskLog(taskLogId, {

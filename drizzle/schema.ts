@@ -151,3 +151,22 @@ export const aiReportPosts = mysqlTable(
 
 export type AiReportPost = typeof aiReportPosts.$inferSelect;
 export type InsertAiReportPost = typeof aiReportPosts.$inferInsert;
+
+// ─── AI weekly reports ─────────────────────────────────────────────────────────
+export const aiWeeklyReports = mysqlTable("ai_weekly_reports", {
+  id: int("id").autoincrement().primaryKey(),
+  reportDate: date("reportDate").notNull(),
+  status: mysqlEnum("status", ["pending", "generating", "success", "failed", "skipped"]).notNull(),
+  postCount: int("postCount").default(0).notNull(),
+  summaryMarkdown: text("summaryMarkdown"),
+  summaryJson: text("summaryJson"),
+  model: varchar("model", { length: 64 }),
+  promptTokens: int("promptTokens"),
+  completionTokens: int("completionTokens"),
+  error: text("error"),
+  generatedAt: timestamp("generatedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AiWeeklyReport = typeof aiWeeklyReports.$inferSelect;
+export type InsertAiWeeklyReport = typeof aiWeeklyReports.$inferInsert;

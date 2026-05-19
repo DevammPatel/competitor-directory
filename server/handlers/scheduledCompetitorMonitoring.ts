@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { runCompetitorMonitoringJob } from "../services/competitorMonitoring";
 import { runDailyAiReportJob } from "../services/aiReportService";
+import { runWeeklyAiReportJob } from "../services/weeklyReportService";
 import { sdk } from "../_core/sdk";
 import { ENV } from "../_core/env";
 
@@ -36,17 +37,36 @@ export async function scheduledCompetitorMonitoringHandler(req: Request, res: Re
 
     console.log(`[Scheduled Handler] Competitor monitoring triggered by: ${taskUid}`);
 
+    // 1. Fetch raw posts from LinkedIn/Apify
     await runCompetitorMonitoringJob();
 
+    // 2. Generate and email daily AI report
     let aiReport: Awaited<ReturnType<typeof runDailyAiReportJob>> | undefined;
     try {
       aiReport = await runDailyAiReportJob();
     } catch (aiError) {
-      console.error("[Scheduled Handler] AI report failed:", aiError);
+      console.error("[Scheduled Handler] Daily AI report failed:", aiError);
       aiReport = {
         status: "failed",
         error: aiError instanceof Error ? aiError.message : String(aiError),
       };
+    }
+
+    // 3. Generate and email weekly AI report on Mondays (getDay() === 1)
+    let weeklyReport: Awaited<ReturnType<typeof runWeeklyAiReportJob>> | undefined;
+    const isMonday = new Date().getDay() === 1;
+    
+    if (isMonday) {
+      console.log("[Scheduled Handler] Today is Monday! Triggering weekly AI report job...");
+      try {
+        weeklyReport = await runWeeklyAiReportJob();
+      } catch (weeklyError) {
+        console.error("[Scheduled Handler] Weekly AI report failed:", weeklyError);
+        weeklyReport = {
+          status: "failed",
+          error: weeklyError instanceof Error ? weeklyError.message : String(weeklyError),
+        };
+      }
     }
 
     res.json({
@@ -54,6 +74,7 @@ export async function scheduledCompetitorMonitoringHandler(req: Request, res: Re
       message: "Competitor monitoring job completed successfully",
       taskUid,
       aiReport,
+      weeklyReport,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

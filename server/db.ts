@@ -9,6 +9,7 @@ import {
   people, Person, InsertPerson,
   aiDailyReports, AiDailyReport, InsertAiDailyReport,
   aiReportPosts, InsertAiReportPost,
+  aiWeeklyReports, AiWeeklyReport, InsertAiWeeklyReport,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -137,8 +138,43 @@ export async function runMigrations(): Promise<void> {
       )
     `);
 
+    // ── 0004: AI weekly reports
+    await runSql(db, `
+      CREATE TABLE IF NOT EXISTS ai_weekly_reports (
+        id int AUTO_INCREMENT NOT NULL,
+        reportDate date NOT NULL,
+        status enum('pending','generating','success','failed','skipped') NOT NULL,
+        postCount int NOT NULL DEFAULT 0,
+        summaryMarkdown text,
+        summaryJson text,
+        model varchar(64),
+        promptTokens int,
+        completionTokens int,
+        error text,
+        generatedAt timestamp,
+        createdAt timestamp NOT NULL DEFAULT (now()),
+        CONSTRAINT ai_weekly_reports_id PRIMARY KEY (id)
+      )
+    `);
+
     // Remove Attio from dataset (hard delete company + posts)
     await purgeCompanyCompletely("attio");
+
+    // Clean up legacy comments and profile fallback URLs from competitor_posts table
+    console.log("[Migrations] Purging legacy comments and reactions from competitor_posts...");
+    await runSql(db, `
+      DELETE FROM competitor_posts 
+      WHERE postUrl IS NULL 
+         OR postUrl = '' 
+         OR postUrl LIKE '%/recent-activity/shares%' 
+         OR postUrl LIKE '%/recent-activity/comments%'
+         OR postUrl LIKE '%/detail/recent-activity%'
+         OR postUrl LIKE '%comment%'
+         OR postUrl LIKE '%reply%'
+         OR postUrl = authorUrl
+         OR postUrl = CONCAT(authorUrl, '/')
+         OR authorUrl = CONCAT(postUrl, '/')
+    `);
 
     console.log("[Migrations] ✓ All migrations applied");
   } catch (error) {
@@ -346,11 +382,22 @@ export async function getRecentCompetitorPosts(_hours?: number): Promise<Competi
   if (!db) return [];
 
   try {
-    const { desc } = await import("drizzle-orm");
-    // Return ALL stored posts ordered by postedAt desc — no time filter ever.
-    // `return await` (not just `return`) is required so the catch block actually
-    // catches DB errors instead of forwarding a rejected promise to the caller.
-    return await db.select().from(competitorPosts).orderBy(desc(competitorPosts.postedAt));
+    const { desc, and, not, eq, like } = await import("drizzle-orm");
+    // Return ALL stored posts ordered by postedAt desc, filtering out comments and profile fallbacks
+    return await db
+      .select()
+      .from(competitorPosts)
+      .where(
+        and(
+          not(like(competitorPosts.postUrl, "%/recent-activity/shares%")),
+          not(like(competitorPosts.postUrl, "%/recent-activity/comments%")),
+          not(like(competitorPosts.postUrl, "%/detail/recent-activity%")),
+          not(like(competitorPosts.postUrl, "%comment%")),
+          not(like(competitorPosts.postUrl, "%reply%")),
+          not(eq(competitorPosts.postUrl, competitorPosts.authorUrl))
+        )
+      )
+      .orderBy(desc(competitorPosts.postedAt));
   } catch (error) {
     console.error("[Database] Failed to get competitor posts:", error);
     return [];
@@ -461,6 +508,29 @@ export async function getPostsNotInAnyReport(limit = 50): Promise<CompetitorPost
   }
 }
 
+export async function getPostsFromPastWeek(limit = 200): Promise<CompetitorPost[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  try {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    
+    // We import desc/gte here since they are not at top level or we can use sql
+    const { desc, gte } = await import("drizzle-orm");
+    
+    return await db
+      .select()
+      .from(competitorPosts)
+      .where(gte(competitorPosts.postedAt, oneWeekAgo))
+      .orderBy(desc(competitorPosts.postedAt))
+      .limit(limit);
+  } catch (error) {
+    console.error("[Database] Failed to get posts from past week:", error);
+    return [];
+  }
+}
+
 export async function createAiReport(data: InsertAiDailyReport): Promise<AiDailyReport | null> {
   const db = await getDb();
   if (!db) return null;
@@ -537,6 +607,35 @@ export async function getAiReportById(reportId: number): Promise<AiDailyReport |
   } catch (error) {
     console.error("[Database] Failed to get AI report:", error);
     return null;
+  }
+}
+
+export async function createAiWeeklyReport(data: InsertAiWeeklyReport): Promise<AiWeeklyReport | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  try {
+    const result = await db.insert(aiWeeklyReports).values(data);
+    const inserted = await db
+      .select()
+      .from(aiWeeklyReports)
+      .where(eq(aiWeeklyReports.id, Number(result[0].insertId)))
+      .limit(1);
+    return inserted[0] ?? null;
+  } catch (error) {
+    console.error("[Database] Failed to create AI weekly report:", error);
+    return null;
+  }
+}
+
+export async function updateAiWeeklyReport(reportId: number, updates: Partial<AiWeeklyReport>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  try {
+    await db.update(aiWeeklyReports).set(updates).where(eq(aiWeeklyReports.id, reportId));
+  } catch (error) {
+    console.error("[Database] Failed to update AI weekly report:", error);
   }
 }
 
