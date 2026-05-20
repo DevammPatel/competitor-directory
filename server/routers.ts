@@ -12,9 +12,12 @@ import {
   getAiReportById,
   getLatestAiReport,
   getPostsByReportId,
+  getAiWeeklyReports,
+  getAiWeeklyReportById,
 } from "./db";
 import { runCompetitorMonitoringJob } from "./services/competitorMonitoring";
 import { runDailyAiReportJob } from "./services/aiReportService";
+import { runWeeklyAiReportJob } from "./services/weeklyReportService";
 import { dailyReportOutputSchema } from "../shared/reportTypes";
 
 export const appRouter = router({
@@ -185,6 +188,38 @@ export const appRouter = router({
     runNow: protectedProcedure.mutation(async ({ ctx }) => {
       if (ctx.user?.role !== "admin") throw new Error("Only admins can trigger AI report generation");
       return runDailyAiReportJob();
+    }),
+
+    listWeekly: protectedProcedure
+      .input(z.object({
+        limit: z.number().min(1).max(100).default(30),
+        offset: z.number().min(0).default(0),
+      }).optional())
+      .query(async ({ input }) => {
+        const limit = input?.limit ?? 30;
+        const offset = input?.offset ?? 0;
+        const reports = await getAiWeeklyReports(limit, offset);
+        return reports.map((r) => ({
+          ...r,
+          summaryJson: r.summaryJson ? safeParseSummaryJson(r.summaryJson) : null,
+        }));
+      }),
+
+    getWeeklyById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const report = await getAiWeeklyReportById(input.id);
+        if (!report) return null;
+        return {
+          ...report,
+          summaryJson: report.summaryJson ? safeParseSummaryJson(report.summaryJson) : null,
+          posts: [], // Weekly reports are aggregate summaries, so they don't have direct mapped posts in DB
+        };
+      }),
+
+    runWeeklyNow: protectedProcedure.mutation(async ({ ctx }) => {
+      if (ctx.user?.role !== "admin") throw new Error("Only admins can trigger AI weekly report generation");
+      return runWeeklyAiReportJob();
     }),
   }),
 });

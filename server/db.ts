@@ -639,6 +639,36 @@ export async function updateAiWeeklyReport(reportId: number, updates: Partial<Ai
   }
 }
 
+export async function getAiWeeklyReports(limit = 30, offset = 0): Promise<AiWeeklyReport[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  try {
+    return await db
+      .select()
+      .from(aiWeeklyReports)
+      .orderBy(desc(aiWeeklyReports.reportDate), desc(aiWeeklyReports.id))
+      .limit(limit)
+      .offset(offset);
+  } catch (error) {
+    console.error("[Database] Failed to list AI weekly reports:", error);
+    return [];
+  }
+}
+
+export async function getAiWeeklyReportById(reportId: number): Promise<AiWeeklyReport | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  try {
+    const rows = await db.select().from(aiWeeklyReports).where(eq(aiWeeklyReports.id, reportId)).limit(1);
+    return rows[0] ?? null;
+  } catch (error) {
+    console.error("[Database] Failed to get AI weekly report:", error);
+    return null;
+  }
+}
+
 export async function getLatestAiReport(): Promise<AiDailyReport | null> {
   const db = await getDb();
   if (!db) return null;
